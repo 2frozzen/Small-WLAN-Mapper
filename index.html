@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Wi-Fi Planner</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="appbar">
+        <div class="brand"><b>Wi-Fi Planner</b><span class="crumb" id="h1">Office building</span></div>
+        <div class="tools">
+          <button id="projOpen" type="button" class="ghost" title="Load a saved project file">Open</button>
+          <button id="projSave" type="button" class="ghost" title="Save all plans and settings to a file">
+            Save
+          </button>
+          <input type="file" id="projFile" accept=".json,application/json" hidden />
+          <span class="vsep opt"></span>
+          <button
+            id="pngBtn"
+            type="button"
+            class="ghost opt"
+            title="Save the map with walls and devices as an image"
+          >
+            Image
+          </button>
+          <button id="printBtn" type="button" class="ghost opt" title="Print the report or save it as PDF">
+            Report
+          </button>
+          <span class="vsep"></span>
+          <button id="themeBtn" type="button" class="ghost" aria-label="Change theme">Theme: Auto</button>
+          <button
+            id="helpBtn"
+            type="button"
+            class="ghost icon"
+            aria-label="Help and keyboard shortcuts"
+            title="Help (?)"
+          >
+            ?
+          </button>
+        </div>
+      </header>
+      <dialog id="help">
+        <h2>Wi-Fi Planner</h2>
+        <p>
+          Estimates Wi-Fi coverage for a building from its floor plan, walls and access points. Everything
+          runs locally in the browser.
+        </p>
+        <ol>
+          <li>
+            <b>Building</b>: pick an example or import a floor plan (PNG/JPG, or drop it onto the map). Walls,
+            outline and width are detected.
+          </li>
+          <li>
+            <b>Scale</b>: if the width is off, use "Measure scale" under "Building" and click a known
+            distance.
+          </li>
+          <li><b>Access points</b>: drag them, or use "Optimise positions" and "Find minimum".</li>
+          <li><b>Devices</b>: place PCs, laptops and TVs and run a speed test per device.</li>
+          <li><b>Result</b>: print a report, save the map as an image or save the project.</li>
+        </ol>
+        <h3>Keyboard shortcuts</h3>
+        <table>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td>
+            <td>Undo / redo</td>
+          </tr>
+          <tr>
+            <td><kbd>Tab</kbd>, arrow keys (+<kbd>Shift</kbd>)</td>
+            <td>Select and move an AP or object</td>
+          </tr>
+          <tr>
+            <td><kbd>R</kbd> / <kbd>Del</kbd></td>
+            <td>Rotate furniture / delete object</td>
+          </tr>
+          <tr>
+            <td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td>
+            <td>Band 2.4 / 5 / 6 GHz</td>
+          </tr>
+          <tr>
+            <td><kbd>V</kbd></td>
+            <td>Next map view</td>
+          </tr>
+          <tr>
+            <td><kbd>Esc</kbd></td>
+            <td>Leave tool, close dialog</td>
+          </tr>
+        </table>
+        <p class="hint">
+          All values are calculated. Before installing, measure a few spots and enter them under "Measurements
+          &amp; calibration".
+        </p>
+        <div class="btnrow">
+          <button id="helpImport" type="button" class="primary">Import floor plan</button
+          ><button id="helpClose" type="button">Close</button>
+        </div>
+      </dialog>
+
+      <div class="app">
+        <div class="map-col">
+          <div class="controls">
+            <select id="planSel" aria-label="Choose building"></select>
+            <button id="planRen" type="button" hidden>Rename</button>
+            <button id="planDup" type="button" title="Copy this plan to compare a variant">Variant</button>
+            <button id="bpOpen" type="button" class="primary">Import floor plan</button>
+            <span class="sep"></span>
+            <button id="undoBtn" type="button" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+              <svg viewBox="0 0 16 16"><path d="M5 3 2 6l3 3M2 6h7a4 4 0 0 1 0 8H7" /></svg>
+            </button>
+            <button id="redoBtn" type="button" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+              <svg viewBox="0 0 16 16"><path d="m11 3 3 3-3 3M14 6H7a4 4 0 0 0 0 8h2" /></svg>
+            </button>
+            <span class="grow"></span>
+            <select id="viewSel" aria-label="Map view">
+              <option value="sig">Signal strength</option>
+              <option value="zone">Serving AP</option>
+              <option value="sinr">SINR</option>
+              <option value="rate">Data rate</option>
+              <option value="count">APs in range</option>
+            </select>
+            <div class="bands" id="bandSeg" role="radiogroup" aria-label="Frequency band">
+              <button type="button" role="radio" aria-checked="true" data-band="0">2.4 GHz</button>
+              <button type="button" role="radio" aria-checked="false" data-band="1">5 GHz</button>
+              <button type="button" role="radio" aria-checked="false" data-band="2">6 GHz</button>
+            </div>
+          </div>
+          <div class="plan" id="plan">
+            <svg id="floor" viewBox="130 190 1660 1170" preserveAspectRatio="none" aria-hidden="true">
+              <polygon id="floorPoly" />
+            </svg>
+            <canvas id="heat"></canvas>
+            <svg
+              id="top"
+              viewBox="130 190 1660 1170"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="Floor plan with movable access points"
+            >
+              <defs>
+                <pattern
+                  id="hatch"
+                  width="14"
+                  height="14"
+                  patternUnits="userSpaceOnUse"
+                  patternTransform="rotate(45)"
+                >
+                  <line x1="0" y1="0" x2="0" y2="14" stroke="#5d7fb5" stroke-width="4" stroke-opacity=".45" />
+                </pattern>
+              </defs>
+              <image id="bgImg" preserveAspectRatio="none" opacity=".55" style="display: none" />
+              <g id="zoneG"></g>
+              <rect
+                id="zoneGhost"
+                fill="none"
+                stroke-width="4"
+                stroke-dasharray="10 6"
+                opacity="0"
+                pointer-events="none"
+              />
+              <g id="furn"></g>
+              <g id="walls" stroke-linecap="butt"></g>
+              <line id="ghost" stroke-width="6" stroke-dasharray="10 6" opacity="0" pointer-events="none" />
+              <g id="links"></g>
+              <g id="devs"></g>
+              <g id="survG"></g>
+              <g id="fapG"></g>
+              <circle id="probe" r="9" fill="none" stroke="var(--fg)" stroke-width="3" opacity="0" />
+              <g id="aps"></g>
+            </svg>
+          </div>
+          <div class="readout" id="readout">
+            <span>Hover over the plan to see the signal at any point.</span>
+          </div>
+          <div class="legend">
+            <div class="scale" id="scaleBox">
+              <span id="scLo">weak -90</span>
+              <div class="bar" id="bar"></div>
+              <span id="scHi">-45 dBm strong</span>
+            </div>
+            <div><i class="sw" style="border-top-color: var(--glass)"></i>Glass</div>
+            <div><i class="sw" style="border-top-color: var(--concrete)"></i>Concrete</div>
+            <div><i class="sw" style="border-top-color: var(--brick)"></i>Brick / load-bearing</div>
+            <div><i class="sw" style="border-top-color: var(--dry)"></i>Drywall / wood</div>
+            <div><i class="sw" style="border-top-color: var(--metal)"></i>Metal</div>
+            <div>
+              <i class="dot" style="background: #2f9e5a"></i> <i class="dot" style="background: #e0b52c"></i>
+              <i class="dot" style="background: #d9553f"></i> Device: good, fair, weak
+            </div>
+            <div><i class="dot" style="background: #5d7fb5"></i> wired</div>
+          </div>
+        </div>
+
+        <aside data-tab="ap">
+          <section class="card" id="statCard">
+            <h2 id="statTitle">Coverage</h2>
+            <div class="stats">
+              <select id="profSel" class="full" aria-label="Wi-Fi requirement"></select>
+              <div class="stat">
+                <div class="top"><span id="lGood">Good</span><b id="sGood">0 %</b></div>
+                <div class="track"><i id="tGood" style="background: #2f9e5a"></i></div>
+              </div>
+              <div class="stat">
+                <div class="top"><span id="lOk">Fair</span><b id="sOk">0 %</b></div>
+                <div class="track"><i id="tOk" style="background: #e0b52c"></i></div>
+              </div>
+              <div class="stat">
+                <div class="top"><span id="lBad">Weak</span><b id="sBad">0 %</b></div>
+                <div class="track"><i id="tBad" style="background: #d9553f"></i></div>
+              </div>
+              <div class="stat" id="outRow" hidden>
+                <div class="top"><span>Balcony/terrace covered well</span><b id="sOut">0 %</b></div>
+                <div class="track"><i id="tOut" style="background: #5d7fb5"></i></div>
+              </div>
+            </div>
+            <p class="hint">Share of the floor area, using the strongest access point at each spot.</p>
+          </section>
+          <div class="bands tabs" id="tabBar" role="tablist" aria-label="Sections">
+            <button type="button" role="tab" data-t="ap" aria-selected="true">Access points</button>
+            <button type="button" role="tab" data-t="bld" aria-selected="false">Building</button>
+            <button type="button" role="tab" data-t="dev" aria-selected="false">Devices &amp; network</button>
+          </div>
+
+          <section class="card" id="bpCard" data-tab="bld">
+            <h2>Import floor plan</h2>
+            <input type="file" id="bpFile" accept="image/png,image/jpeg,image/webp" hidden />
+            <p class="hint" id="bpInfo" style="margin-top: 0">
+              Choose a floor plan as PNG or JPG, or drop it onto the map. Walls are detected automatically.
+            </p>
+            <div class="row" style="margin-top: 10px">
+              <label for="bpW">Building width (outside)</label
+              ><span><input type="number" id="bpW" min="3" max="100" step="0.01" value="15" /> m</span>
+            </div>
+            <label class="chk"
+              ><input type="checkbox" id="bpAuto" checked /> Read width from dimensions</label
+            >
+            <details id="bpMore">
+              <summary class="hint" style="cursor: pointer">Fine-tune detection</summary>
+              <div class="row" style="margin-top: 10px">
+                <label for="bpT">Dark/light threshold</label><output id="oBpT"></output
+                ><input id="bpT" type="range" min="40" max="230" step="5" value="130" />
+              </div>
+              <div class="row">
+                <label for="bpMin">Minimum wall thickness</label><output id="oBpMin"></output
+                ><input id="bpMin" type="range" min="1" max="6" step="1" value="2" />
+              </div>
+              <div class="row">
+                <label for="bpOpen">Close openings up to</label><output id="oBpOpen"></output
+                ><input id="bpOpen" type="range" min="0.6" max="4" step="0.2" value="1" />
+              </div>
+              <label class="chk"
+                ><input type="checkbox" id="bpBalc" checked /> Detect balconies and terraces</label
+              >
+            </details>
+            <div class="btnrow">
+              <button id="bpPick" type="button" class="primary">Choose image …</button>
+              <button id="bpGo" type="button" disabled>Detect again</button>
+              <button
+                type="button"
+                class="measBtn"
+                title="Click both ends of a known distance and enter its length"
+              >
+                Measure scale
+              </button>
+              <button id="bpDel" type="button" hidden>Delete this plan</button>
+            </div>
+            <label class="chk" id="bgRow" hidden
+              ><input type="checkbox" id="showBg" checked /> Show floor plan in background</label
+            >
+          </section>
+
+          <section class="card" data-tab="bld">
+            <h2>Floor area</h2>
+            <p class="hint" id="zoneInfo" style="margin-top: 0"></p>
+            <div class="bands" id="zoneSeg" role="radiogroup" aria-label="Area tool">
+              <button
+                type="button"
+                role="radio"
+                aria-checked="false"
+                data-z="out"
+                title="Balcony, terrace, garden: calculated but counted separately"
+              >
+                Outdoor
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked="false"
+                data-z="cut"
+                title="Not part of the building"
+              >
+                Cut out
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked="false"
+                data-z="in"
+                title="Add missing indoor area"
+              >
+                Add
+              </button>
+            </div>
+            <p class="hint">
+              Pick a tool and drag a rectangle on the plan. Click the tool again to stop. Undo with Ctrl+Z.
+            </p>
+            <div class="btnrow">
+              <button id="zoneUndo" type="button">Remove last rectangle</button
+              ><button id="zoneReset" type="button">Remove all rectangles</button>
+            </div>
+          </section>
+
+          <section class="card" data-tab="dev">
+            <h2>Internet &amp; speed test</h2>
+            <label for="lineSel" class="lbl">Internet connection</label>
+            <select id="lineSel" class="full"></select>
+            <p class="hint" id="lineInfo"></p>
+            <div class="st">
+              <div class="st-head"><b id="stName">No device selected</b><span id="stConn"></span></div>
+              <div class="st-grid">
+                <div>
+                  <span>Ping</span><strong><span id="stPing">-</span><small> ms</small></strong>
+                </div>
+                <div>
+                  <span>Download</span><strong><span id="stDown">-</span><small> Mbit/s</small></strong>
+                </div>
+                <div>
+                  <span>Upload</span><strong><span id="stUp">-</span><small> Mbit/s</small></strong>
+                </div>
+              </div>
+              <div class="track"><i id="stBar" style="background: var(--accent)"></i></div>
+              <div class="st-foot">
+                <span id="stPhase"></span><button id="stBtn" type="button" disabled>Run speed test</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" data-tab="dev">
+            <h2>Layout</h2>
+            <h3>Furniture</h3>
+            <div class="pal" id="palF"></div>
+            <h3>Devices</h3>
+            <div class="pal" id="palD"></div>
+            <h3>Interference</h3>
+            <div class="pal" id="palN"></div>
+            <div class="selbar" id="selBar" hidden>
+              <div class="selname"><b id="selName"></b><span id="selSub"></span></div>
+              <div class="selacts">
+                <div class="bands" id="modeSeg" role="radiogroup" aria-label="Connection">
+                  <button type="button" role="radio" aria-checked="true" data-mode="wlan">Wi-Fi</button>
+                  <button type="button" role="radio" aria-checked="false" data-mode="lan">LAN</button>
+                </div>
+                <select id="selCh" aria-label="Channel of the interferer" hidden></select>
+                <button id="selRot" type="button">Rotate</button>
+                <button id="selDel" type="button">Remove</button>
+              </div>
+            </div>
+            <h3>Devices on the network (<span id="devCount">0</span>)</h3>
+            <div class="devlist" id="devList"></div>
+            <label class="chk"><input type="checkbox" id="showLinks" checked /> Show connection lines</label>
+            <p class="hint">
+              Drag objects on the plan. Selected object: arrow keys move, R rotates furniture, Del deletes.
+            </p>
+            <div style="margin-top: 12px"><button id="resetItems" type="button">Reset layout</button></div>
+          </section>
+
+          <section class="card" data-tab="ap">
+            <h2>Access points</h2>
+            <div class="aplist" id="aplist"></div>
+            <p class="hint" id="chHint"></p>
+            <p class="hint">
+              Untick to switch an AP off. Select with Tab and move with the arrow keys (Shift = larger steps).
+              New APs are placed at the weakest spot.
+            </p>
+            <div class="btnrow">
+              <button id="addAp" type="button">+ Access point</button>
+              <button id="autoCh" type="button">Assign channels</button>
+              <button id="reset" type="button">Reset</button>
+            </div>
+            <div class="btnrow">
+              <button
+                id="optKeep"
+                type="button"
+                class="primary"
+                title="Same number of APs, best positions for the selected band and requirement"
+              >
+                Optimise positions
+              </button>
+              <button id="optAuto" type="button" title="Fewest APs for at least 95 % good coverage">
+                Find minimum
+              </button>
+            </div>
+            <p class="hint" id="optInfo">
+              The optimiser works for the selected band and requirement. Planning for 5 GHz usually covers 2.4
+              GHz as well.
+            </p>
+          </section>
+
+          <section class="card" data-tab="bld">
+            <h2>Floors</h2>
+            <div class="row">
+              <label for="flBld">Building</label
+              ><input
+                type="text"
+                id="flBld"
+                list="flList"
+                placeholder="e.g. Smith house"
+                style="width: 160px"
+              />
+            </div>
+            <datalist id="flList"></datalist>
+            <div class="row">
+              <label for="flLvl">Floor of this plan</label
+              ><select id="flLvl"></select>
+            </div>
+            <div class="row">
+              <label for="pSlab">Loss per ceiling</label><output id="oSlab"></output
+              ><input id="pSlab" type="range" min="5" max="35" step="1" value="18" />
+            </div>
+            <p class="hint" id="flInfo"></p>
+          </section>
+
+          <section class="card" data-tab="ap">
+            <h2>Materials &amp; cabling</h2>
+            <div id="matBox"></div>
+            <p class="hint">
+              Cable runs measured at right angles from the router, plus 20 % slack and 3 m per drop. Mesh
+              repeaters need no cable.
+            </p>
+          </section>
+
+          <section class="card" data-tab="bld">
+            <h2>Radio model</h2>
+            <div class="row">
+              <label for="pTx">Transmit power P<sub>TX</sub></label
+              ><output id="oTx"></output><input id="pTx" type="range" min="5" max="23" step="1" value="14" />
+            </div>
+            <div class="row">
+              <label for="pGtx">AP antenna gain G<sub>TX</sub></label
+              ><output id="oGtx"></output><input id="pGtx" type="range" min="0" max="10" step="1" value="3" />
+            </div>
+            <div class="row">
+              <label for="pN">Path loss exponent</label><output id="oN"></output
+              ><input id="pN" type="range" min="2" max="4" step="0.1" value="2.6" />
+            </div>
+            <div class="row">
+              <label for="pW">Building width on plan</label><output id="oW"></output
+              ><input id="pW" type="range" min="3" max="200" step="0.5" value="40" />
+            </div>
+            <div class="row">
+              <label for="pNf">Receiver noise figure</label><output id="oNf"></output
+              ><input id="pNf" type="range" min="3" max="12" step="1" value="7" />
+            </div>
+            <div class="row">
+              <label for="pGap">Gap to Shannon limit</label><output id="oGap"></output
+              ><input id="pGap" type="range" min="0" max="10" step="1" value="0" />
+            </div>
+            <div class="row">
+              <label>Channel width 2.4 / 5 / 6 GHz</label
+              ><span
+                ><select id="bw0" aria-label="Channel width 2.4 GHz">
+                  <option>20</option>
+                  <option>40</option>
+                </select>
+                <select id="bw1" aria-label="Channel width 5 GHz">
+                  <option>20</option>
+                  <option>40</option>
+                  <option>80</option>
+                  <option>160</option>
+                </select>
+                <select id="bw2" aria-label="Channel width 6 GHz">
+                  <option>20</option>
+                  <option>40</option>
+                  <option>80</option>
+                  <option>160</option>
+                </select>
+                MHz</span
+              >
+            </div>
+            <details>
+              <summary class="hint" style="cursor: pointer">Model formulas</summary>
+              <div class="hint formula" id="formula"></div>
+            </details>
+            <button type="button" class="measBtn">Set scale from a known distance</button>
+          </section>
+
+          <section class="card" data-tab="bld">
+            <h2>Measurements &amp; calibration</h2>
+            <p class="hint" style="margin-top: 0">
+              Measure the signal at a few spots with a Wi-Fi app on your phone and enter the values. The
+              planner then fits the radio model to your building.
+            </p>
+            <label class="chk"
+              ><input type="checkbox" id="survOn" /> Add measurements (click on the plan)</label
+            >
+            <div class="btnrow">
+              <button id="survFit" type="button" class="primary" disabled>Calibrate model</button>
+              <button id="survClr" type="button" disabled>Clear measurements</button>
+            </div>
+            <p class="hint" id="survInfo">
+              Measurements apply to the selected band. Click an existing point to remove it.
+            </p>
+          </section>
+
+          <section class="card" data-tab="bld">
+            <h2>Loss per wall</h2>
+            <div class="row">
+              <label for="dG"><i class="sw" style="border-top-color: var(--glass)"></i>Glass</label
+              ><output id="oG"></output><input id="dG" type="range" min="0" max="10" step="1" value="3" />
+            </div>
+            <div class="row">
+              <label for="dC"><i class="sw" style="border-top-color: var(--concrete)"></i>Concrete</label
+              ><output id="oC"></output><input id="dC" type="range" min="0" max="25" step="1" value="12" />
+            </div>
+            <div class="row">
+              <label for="dB"
+                ><i class="sw" style="border-top-color: var(--brick)"></i>Brick / load-bearing</label
+              ><output id="oB"></output><input id="dB" type="range" min="0" max="30" step="1" value="15" />
+            </div>
+            <div class="row">
+              <label for="dD"><i class="sw" style="border-top-color: var(--dry)"></i>Drywall / wood</label
+              ><output id="oD"></output><input id="dD" type="range" min="0" max="12" step="1" value="4" />
+            </div>
+            <div class="row">
+              <label for="dM"><i class="sw" style="border-top-color: var(--metal)"></i>Metal / elevator</label
+              ><output id="oM"></output><input id="dM" type="range" min="0" max="45" step="1" value="30" />
+            </div>
+            <p class="hint" id="wallHint"></p>
+            <label class="chk"><input type="checkbox" id="editWalls" /> Edit walls</label>
+            <div id="wallTools" hidden>
+              <div
+                class="bands"
+                id="wtSeg"
+                role="radiogroup"
+                aria-label="Type for new walls"
+                style="margin-top: 10px"
+              >
+                <button type="button" role="radio" aria-checked="false" data-wt="g">Glass</button>
+                <button type="button" role="radio" aria-checked="true" data-wt="c">Concrete</button>
+                <button type="button" role="radio" aria-checked="false" data-wt="b">Brick</button>
+                <button type="button" role="radio" aria-checked="false" data-wt="d">Wood</button>
+                <button type="button" role="radio" aria-checked="false" data-wt="m">Metal</button>
+              </div>
+              <p class="hint">
+                Drag on empty space to draw a wall (Shift = any angle). Click a wall to change its type,
+                right-click or Alt+click deletes it.
+              </p>
+              <div class="btnrow"><button id="resetWalls" type="button">Reset walls</button></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <div id="report" hidden></div>
+    </div>
+
+    <script src="js/physics.js"></script>
+    <script src="js/detection.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "wifi-planner",
+  "version": "1.0.0",
+  "description": "Plan Wi-Fi coverage from a floor plan, in the browser",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test.js",
+    "format": "npx prettier --write \"js/*.js\" \"tests/*.js\" css/style.css index.html"
+  }
+}
